@@ -16,78 +16,20 @@ async function loadAirports() {
     // Initialize autocomplete after loading airports
     setupAutocomplete('from-input', 'from-suggestions', (airport) => {
       selectedFrom = airport;
-      updateFlightPath();
+      updateFlightPath(false); // Don't calculate route yet
     });
 
     setupAutocomplete('to-input', 'to-suggestions', (airport) => {
       selectedTo = airport;
-      updateFlightPath();
+      updateFlightPath(false); // Don't calculate route yet
     });
   } catch (error) {
     console.error('Error loading airports:', error);
   }
 }
 
-// Setup autocomplete for an input field
-function setupAutocomplete(inputId, suggestionsId, onSelect) {
-  const input = document.getElementById(inputId);
-  const suggestions = document.getElementById(suggestionsId);
-  
-  input.addEventListener('input', () => {
-    const value = input.value.toLowerCase();
-    suggestions.innerHTML = '';
-    
-    if (value.length < 2) {
-      suggestions.classList.add('hidden');
-      return;
-    }
-    
-    const matches = airports.filter(airport => 
-      airport.code.toLowerCase().includes(value) ||
-      airport.name.toLowerCase().includes(value)
-    ).slice(0, 5);
-    
-    if (matches.length > 0) {
-      suggestions.classList.remove('hidden');
-      matches.forEach(airport => {
-        const div = document.createElement('div');
-        div.className = 'suggestion-item';
-        div.innerHTML = `
-          <div class="text-sm">
-            <span class="font-semibold">${airport.code}</span> - ${airport.name}
-          </div>
-        `;
-        div.addEventListener('click', () => {
-          input.value = airport.code;
-          suggestions.classList.add('hidden');
-          onSelect(airport);
-        });
-        suggestions.appendChild(div);
-      });
-    } else {
-      suggestions.classList.add('hidden');
-    }
-  });
-  
-  // Hide suggestions when clicking outside
-  document.addEventListener('click', (e) => {
-    if (!input.contains(e.target) && !suggestions.contains(e.target)) {
-      suggestions.classList.add('hidden');
-    }
-  });
-}
-
-// Initialize map
-function initializeMap() {
-  map = L.map('map').setView([39.8283, -98.5795], 4);
-  
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: ' OpenStreetMap contributors'
-  }).addTo(map);
-}
-
 // Update markers and flight path on map
-async function updateFlightPath() {
+async function updateFlightPath(calculateRoute = false) {
   // Clear existing markers and path
   markers.forEach(marker => map.removeLayer(marker));
   markers.length = 0;
@@ -106,14 +48,7 @@ async function updateFlightPath() {
         throw new Error('Airport not found in database');
       }
 
-      // Try to find a route using airways
-      const route = await openAIPClient.getAirways(
-        { lat: fromAirport.lat, lon: fromAirport.lon },
-        { lat: toAirport.lat, lon: toAirport.lon }
-      );
-      console.log('Found route:', route);
-      
-      // Add airport markers first
+      // Add airport markers
       const fromMarker = L.marker([fromAirport.lat, fromAirport.lon], {
         title: `${fromAirport.code} - ${fromAirport.name}`
       }).bindPopup(`
@@ -138,53 +73,65 @@ async function updateFlightPath() {
       fromMarker.addTo(map);
       toMarker.addTo(map);
 
+      // Only fetch waypoints if we're calculating the route
       let pathCoordinates;
-      if (route && route.length > 0) {
-        // Use airway route with waypoints from API
-        const allPoints = [
-          [fromAirport.lat, fromAirport.lon],
-          ...route.map(wp => [wp.lat, wp.lon]),
-          [toAirport.lat, toAirport.lon]
-        ];
+      if (calculateRoute) {
+        // Try to find a route using airways
+        const waypoints = await openAIPClient.getAirways(
+          { lat: fromAirport.lat, lon: fromAirport.lon },
+          { lat: toAirport.lat, lon: toAirport.lon }
+        );
+        console.log('Found waypoints:', waypoints);
         
-        pathCoordinates = allPoints;
-        
-        // Add route information to the map
-        const routeInfo = L.popup()
-          .setLatLng(allPoints[Math.floor(allPoints.length / 2)])
-          .setContent(`
-            <div class="text-sm">
-              <p class="font-semibold">Via Airways</p>
-              <p class="text-gray-600">${route.length} waypoints</p>
-            </div>
-          `);
-        
-        flightPath = L.polyline(pathCoordinates, {
-          className: 'flight-path',
-          color: '#3b82f6',
-          weight: 3,
-          opacity: 0.8
-        }).addTo(map).bindPopup(routeInfo);
+        if (waypoints && waypoints.length > 0) {
+          // Use airway route with waypoints from API
+          const allPoints = [
+            [fromAirport.lat, fromAirport.lon],
+            ...waypoints.map(wp => [wp.lat, wp.lon]),
+            [toAirport.lat, toAirport.lon]
+          ];
+          
+          pathCoordinates = allPoints;
+          
+          // Add route information to the map
+          const routeInfo = L.popup()
+            .setLatLng(allPoints[Math.floor(allPoints.length / 2)])
+            .setContent(`
+              <div class="text-sm">
+                <p class="font-semibold">Via Airways</p>
+                <p class="text-gray-600">${waypoints.length} waypoints</p>
+              </div>
+            `);
+          
+          flightPath = L.polyline(pathCoordinates, {
+            className: 'flight-path',
+            color: '#3b82f6',
+            weight: 3,
+            opacity: 0.8
+          }).addTo(map).bindPopup(routeInfo);
 
-        // Add waypoint markers from API
-        route.forEach(wp => {
-          const marker = L.marker([wp.lat, wp.lon], {
-            title: wp.name,
-            icon: L.divIcon({
-              className: 'waypoint-marker',
-              html: '<div class="w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>'
-            })
-          }).bindPopup(`
-            <div class="text-sm">
-              <p class="font-semibold">${wp.name}</p>
-              <p class="text-gray-600">${wp.type || 'Waypoint'}</p>
-            </div>
-          `);
-          markers.push(marker);
-          marker.addTo(map);
-        });
-      } else {
-        // Fall back to direct route between airports
+          // Add waypoint markers
+          waypoints.forEach(wp => {
+            const marker = L.marker([wp.lat, wp.lon], {
+              title: wp.name,
+              icon: L.divIcon({
+                className: 'waypoint-marker',
+                html: '<div class="w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>'
+              })
+            }).bindPopup(`
+              <div class="text-sm">
+                <p class="font-semibold">${wp.name}</p>
+                <p class="text-gray-600">${wp.type || 'Waypoint'}</p>
+              </div>
+            `);
+            markers.push(marker);
+            marker.addTo(map);
+          });
+        }
+      }
+
+      // If no route calculated or no waypoints found, show direct route
+      if (!pathCoordinates) {
         pathCoordinates = [[fromAirport.lat, fromAirport.lon], [toAirport.lat, toAirport.lon]];
         
         flightPath = L.polyline(pathCoordinates, {
@@ -204,6 +151,106 @@ async function updateFlightPath() {
     }
   }
 }
+
+// Initialize map
+function initializeMap() {
+  map = L.map('map').setView([39.8283, -98.5795], 4);
+  
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: ' OpenStreetMap contributors'
+  }).addTo(map);
+}
+
+// Calculate button click handler
+document.getElementById("calculate-btn").addEventListener("click", async () => {
+  if (!selectedFrom || !selectedTo) {
+    document.getElementById("results").innerHTML = "<p class='text-red-500 dark:text-red-400'>Please select both airports.</p>";
+    return;
+  }
+
+  const speed = parseFloat(document.getElementById("speed-input").value);
+  const extra = parseFloat(document.getElementById("extra-minutes").value);
+
+  try {
+    // Update the map with waypoints
+    await updateFlightPath(true);
+    
+    // Get the current route information
+    const fromAirport = airports.find(a => a.code === selectedFrom.code);
+    const toAirport = airports.find(a => a.code === selectedTo.code);
+    
+    // Calculate distance and time
+    const waypoints = await openAIPClient.getAirways(
+      { lat: fromAirport.lat, lon: fromAirport.lon },
+      { lat: toAirport.lat, lon: toAirport.lon }
+    );
+
+    let distance, routeType, waypointText;
+    if (waypoints && waypoints.length > 0) {
+      // Calculate distance along waypoint route
+      distance = calculateRouteDistance([
+        { lat: fromAirport.lat, lon: fromAirport.lon },
+        ...waypoints,
+        { lat: toAirport.lat, lon: toAirport.lon }
+      ]);
+      routeType = 'Via Airways';
+      waypointText = [
+        fromAirport.code,
+        ...waypoints.map(wp => wp.name),
+        toAirport.code
+      ].join(' → ');
+    } else {
+      // Calculate direct distance
+      distance = haversine(fromAirport.lat, fromAirport.lon, toAirport.lat, toAirport.lon);
+      routeType = 'Direct Route';
+      waypointText = `${fromAirport.code} → ${toAirport.code}`;
+    }
+
+    const nm = distance / 1.852;
+    const time = (nm / speed * 60) + extra;
+    const hours = Math.floor(time / 60);
+    const minutes = Math.round(time % 60);
+
+    document.getElementById("results").innerHTML = `
+      <div class="space-y-2">
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <p class="text-sm text-gray-600 dark:text-gray-400">From</p>
+            <p class="font-semibold">${fromAirport.name}</p>
+            <p class="text-sm">${fromAirport.code} - ${fromAirport.icao || ''}</p>
+          </div>
+          <div>
+            <p class="text-sm text-gray-600 dark:text-gray-400">To</p>
+            <p class="font-semibold">${toAirport.name}</p>
+            <p class="text-sm">${toAirport.code} - ${toAirport.icao || ''}</p>
+          </div>
+        </div>
+        <div class="border-t dark:border-gray-600 my-4"></div>
+        <div>
+          <p class="text-sm text-gray-600 dark:text-gray-400">Route Type</p>
+          <p class="font-semibold">${routeType}</p>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">${waypointText}</p>
+        </div>
+        <div>
+          <p class="text-sm text-gray-600 dark:text-gray-400">Distance</p>
+          <p class="font-semibold">${distance.toFixed(1)} km / ${nm.toFixed(1)} NM</p>
+        </div>
+        <div>
+          <p class="text-sm text-gray-600 dark:text-gray-400">Estimated Flight Time</p>
+          <p class="font-semibold text-xl">${hours}h ${minutes}m</p>
+        </div>
+      </div>
+    `;
+  } catch (error) {
+    console.error('Error calculating route:', error);
+    document.getElementById("results").innerHTML = `
+      <div class="text-red-500 dark:text-red-400">
+        <p>Error calculating route. Please try again.</p>
+        <p class="text-sm mt-2">Error details: ${error.message}</p>
+      </div>
+    `;
+  }
+});
 
 // Initialize when the page loads
 document.addEventListener('DOMContentLoaded', () => {
@@ -395,79 +442,3 @@ function calculateRouteDistance(waypoints) {
   
   return totalDistance;
 }
-
-document.getElementById("calculate-btn").addEventListener("click", async () => {
-  if (!selectedFrom || !selectedTo) {
-    document.getElementById("results").innerHTML = "<p class='text-red-500 dark:text-red-400'>Please select both airports.</p>";
-    return;
-  }
-
-  const speed = parseFloat(document.getElementById("speed-input").value);
-  const extra = parseFloat(document.getElementById("extra-minutes").value);
-
-  try {
-    // Try to find a route using airways
-    const route = await openAIPClient.getAirways(
-      { lat: selectedFrom.lat, lon: selectedFrom.lon },
-      { lat: selectedTo.lat, lon: selectedTo.lon }
-    );
-    console.log('Calculating with route:', route);
-    
-    let distance, routeType, waypoints;
-    if (route) {
-      // Calculate distance along airway route
-      distance = calculateRouteDistance(route);
-      routeType = `Via Airways`;
-      waypoints = route.map(wp => wp.name).join(' → ');
-    } else {
-      // Calculate direct distance
-      distance = haversine(selectedFrom.lat, selectedFrom.lon, selectedTo.lat, selectedTo.lon);
-      routeType = 'Direct Route';
-      waypoints = `${selectedFrom.code} → ${selectedTo.code}`;
-    }
-
-    const nm = distance / 1.852;
-    const time = (nm / speed * 60) + extra;
-    const hours = Math.floor(time / 60);
-    const minutes = Math.round(time % 60);
-
-    document.getElementById("results").innerHTML = `
-      <div class="space-y-2">
-        <div class="grid grid-cols-2 gap-4">
-          <div>
-            <p class="text-sm text-gray-600 dark:text-gray-400">From</p>
-            <p class="font-semibold">${selectedFrom.name}</p>
-            <p class="text-sm">${selectedFrom.code} - ${selectedFrom.icao || ''}</p>
-          </div>
-          <div>
-            <p class="text-sm text-gray-600 dark:text-gray-400">To</p>
-            <p class="font-semibold">${selectedTo.name}</p>
-            <p class="text-sm">${selectedTo.code} - ${selectedTo.icao || ''}</p>
-          </div>
-        </div>
-        <div class="border-t dark:border-gray-600 my-4"></div>
-        <div>
-          <p class="text-sm text-gray-600 dark:text-gray-400">Route Type</p>
-          <p class="font-semibold">${routeType}</p>
-          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">${waypoints}</p>
-        </div>
-        <div>
-          <p class="text-sm text-gray-600 dark:text-gray-400">Distance</p>
-          <p class="font-semibold">${distance.toFixed(1)} km / ${nm.toFixed(1)} NM</p>
-        </div>
-        <div>
-          <p class="text-sm text-gray-600 dark:text-gray-400">Estimated Flight Time</p>
-          <p class="font-semibold text-xl">${hours}h ${minutes}m</p>
-        </div>
-      </div>
-    `;
-  } catch (error) {
-    console.error('Error calculating route:', error);
-    document.getElementById("results").innerHTML = `
-      <div class="text-red-500 dark:text-red-400">
-        <p>Error calculating route. Please try again.</p>
-        <p class="text-sm mt-2">Error details: ${error.message}</p>
-      </div>
-    `;
-  }
-});
