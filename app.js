@@ -5,6 +5,7 @@ let flightPath;
 let selectedFrom = null;
 let selectedTo = null;
 let airports = [];
+let loadingChunks = false;
 
 // Load airports data
 async function loadAirports() {
@@ -14,15 +15,61 @@ async function loadAirports() {
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
-    const text = await response.text();
-    console.log('Received airports data, length:', text.length);
-    try {
-      airports = JSON.parse(text);
-      console.log('Successfully parsed airports data:', airports.length);
-    } catch (parseError) {
-      console.error('Error parsing airports data:', parseError);
-      throw new Error('Failed to parse airports data: ' + parseError.message);
+
+    // Read the response as a text stream
+    const reader = response.body.getReader();
+    let chunks = '';
+    let processedCount = 0;
+    
+    // Process the stream in chunks
+    while (true) {
+      const {done, value} = await reader.read();
+      
+      if (done) {
+        break;
+      }
+      
+      // Convert the chunk to text and add to our buffer
+      chunks += new TextDecoder().decode(value);
+      
+      // Try to extract complete JSON objects
+      let startIdx = chunks.indexOf('{');
+      while (startIdx !== -1) {
+        let endIdx = chunks.indexOf('}', startIdx) + 1;
+        if (endIdx === 0) break; // No complete object found
+        
+        let objectStr = chunks.slice(startIdx, endIdx);
+        try {
+          // Try to parse the object
+          let airport = JSON.parse(objectStr);
+          if (airport.code && airport.name && airport.lat && airport.lon) {
+            airports.push(airport);
+            processedCount++;
+            
+            // Update loading message every 100 airports
+            if (processedCount % 100 === 0) {
+              const loadingElement = document.getElementById('loading');
+              if (loadingElement) {
+                loadingElement.innerHTML = `
+                  <div class="text-center py-12">
+                    <div class="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
+                    <p class="text-gray-600 dark:text-gray-400">Loading airports... (${processedCount} loaded)</p>
+                  </div>
+                `;
+              }
+            }
+          }
+        } catch (e) {
+          // Ignore parsing errors for incomplete objects
+        }
+        
+        // Remove the processed object from chunks
+        chunks = chunks.slice(endIdx);
+        startIdx = chunks.indexOf('{');
+      }
     }
+    
+    console.log('Successfully loaded airports:', airports.length);
     
     // Initialize autocomplete after loading airports
     setupAutocomplete('from-input', 'from-suggestions', (airport) => {
