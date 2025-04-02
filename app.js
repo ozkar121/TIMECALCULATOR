@@ -1,72 +1,20 @@
-// Initialize airports array
+// Global variables
+let map;
+let markers = [];
+let flightPath;
+let selectedFrom = null;
+let selectedTo = null;
 let airports = [];
 
-// Load airports from JSON file
+// Load airports data
 async function loadAirports() {
   try {
     const response = await fetch('airports.json');
-    const allAirports = await response.json();
-    
-    // Filter for major airports and format the data
-    airports = allAirports
-      .filter(airport => 
-        // Include airports with IATA code and coordinates
-        airport.code && airport.lat && airport.lon &&
-        // Filter for major airports (you can adjust these criteria)
-        (airport.icao?.startsWith('K') || // US airports
-         airport.icao?.startsWith('MM') || // Mexican airports
-         airport.icao === 'EGLL') // London Heathrow
-      )
-      .map(airport => ({
-        code: airport.code,
-        icao: airport.icao || '',
-        name: airport.name,
-        lat: parseFloat(airport.lat),
-        lon: parseFloat(airport.lon)
-      }));
-
-    // Load any custom airports
-    const customAirports = JSON.parse(localStorage.getItem('customAirports') || '[]');
-    airports = [...airports, ...customAirports];
-
-    // Initialize the map after airports are loaded
-    initializeMap();
-    
-    // Hide loading and show main content
-    document.getElementById('loading').classList.add('hidden');
-    document.getElementById('main-content').classList.remove('hidden');
+    airports = await response.json();
+    console.log('Loaded airports:', airports.length);
+    initializeAutocomplete();
   } catch (error) {
     console.error('Error loading airports:', error);
-    document.getElementById('loading').innerHTML = `
-      <div class="text-red-500 dark:text-red-400 text-center">
-        <p class="text-xl mb-2">Error loading airports data</p>
-        <p class="text-sm">Please try refreshing the page</p>
-      </div>
-    `;
-  }
-}
-
-// Save custom airports to localStorage
-const saveCustomAirports = () => {
-  const defaultAirportCodes = new Set(airports.filter(a => a.icao?.startsWith('K') || a.icao?.startsWith('MM') || a.icao === 'EGLL').map(a => a.code));
-  const customAirports = airports.filter(a => !defaultAirportCodes.has(a.code));
-  localStorage.setItem('customAirports', JSON.stringify(customAirports));
-};
-
-let map, flightPath;
-let selectedFrom = null;
-let selectedTo = null;
-const markers = [];
-
-// Initialize dark mode from localStorage or system preference
-function initializeDarkMode() {
-  const darkModeEnabled = localStorage.getItem('darkMode') === 'true' ||
-    (!localStorage.getItem('darkMode') && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  
-  if (darkModeEnabled) {
-    document.documentElement.classList.add('dark');
-  } else {
-    document.documentElement.classList.remove('dark');
   }
 }
 
@@ -91,13 +39,21 @@ async function updateFlightPath() {
 
   if (selectedFrom && selectedTo) {
     try {
+      // Add airport markers first
+      const fromAirport = airports.find(a => a.code === selectedFrom.code);
+      const toAirport = airports.find(a => a.code === selectedTo.code);
+      
+      if (!fromAirport || !toAirport) {
+        throw new Error('Airport not found in database');
+      }
+
       // Try to find a route using airways
-      const route = await findBestRoute(selectedFrom, selectedTo);
+      const route = await findBestRoute(fromAirport, toAirport);
       console.log('Found route:', route);
       
       let pathCoordinates;
-      if (route) {
-        // Use airway route
+      if (route && route.waypoints && route.waypoints.length > 0) {
+        // Use airway route with waypoints from API
         pathCoordinates = route.waypoints.map(wp => [wp.lat, wp.lon]);
         
         // Add route information to the map
@@ -118,35 +74,35 @@ async function updateFlightPath() {
           opacity: 0.8
         }).addTo(map).bindPopup(routeInfo);
 
-        // Only add waypoint markers if route is found
+        // Add markers for airports and waypoints
+        const fromMarker = L.marker([fromAirport.lat, fromAirport.lon], {
+          title: `${fromAirport.code} - ${fromAirport.name}`
+        }).bindPopup(`
+          <div class="text-sm">
+            <p class="font-semibold">${fromAirport.name}</p>
+            <p>${fromAirport.code} - ${fromAirport.icao}</p>
+            <p class="text-gray-600">Starting Point</p>
+          </div>
+        `);
+        
+        const toMarker = L.marker([toAirport.lat, toAirport.lon], {
+          title: `${toAirport.code} - ${toAirport.name}`
+        }).bindPopup(`
+          <div class="text-sm">
+            <p class="font-semibold">${toAirport.name}</p>
+            <p>${toAirport.code} - ${toAirport.icao}</p>
+            <p class="text-gray-600">Destination</p>
+          </div>
+        `);
+        
+        markers.push(fromMarker, toMarker);
+        fromMarker.addTo(map);
+        toMarker.addTo(map);
+
+        // Add waypoint markers (excluding airports)
         route.waypoints.forEach((wp, index) => {
-          // Create marker based on point type
-          let marker;
-          if (index === 0) {
-            // Starting airport
-            marker = L.marker([wp.lat, wp.lon], {
-              title: `${selectedFrom.code} - ${selectedFrom.name}`
-            }).bindPopup(`
-              <div class="text-sm">
-                <p class="font-semibold">${selectedFrom.name}</p>
-                <p>${selectedFrom.code} - ${selectedFrom.icao}</p>
-                <p class="text-gray-600">Starting Point</p>
-              </div>
-            `);
-          } else if (index === route.waypoints.length - 1) {
-            // Ending airport
-            marker = L.marker([wp.lat, wp.lon], {
-              title: `${selectedTo.code} - ${selectedTo.name}`
-            }).bindPopup(`
-              <div class="text-sm">
-                <p class="font-semibold">${selectedTo.name}</p>
-                <p>${selectedTo.code} - ${selectedTo.icao}</p>
-                <p class="text-gray-600">Destination</p>
-              </div>
-            `);
-          } else {
-            // Waypoint
-            marker = L.marker([wp.lat, wp.lon], {
+          if (index > 0 && index < route.waypoints.length - 1) {
+            const marker = L.marker([wp.lat, wp.lon], {
               title: wp.name,
               icon: L.divIcon({
                 className: 'waypoint-marker',
@@ -159,31 +115,31 @@ async function updateFlightPath() {
                 <p class="text-gray-600">Along ${route.name}</p>
               </div>
             `);
+            markers.push(marker);
+            marker.addTo(map);
           }
-          markers.push(marker);
-          marker.addTo(map);
         });
       } else {
-        // Fall back to direct route
-        pathCoordinates = [[selectedFrom.lat, selectedFrom.lon], [selectedTo.lat, selectedTo.lon]];
+        // Fall back to direct route between airports
+        pathCoordinates = [[fromAirport.lat, fromAirport.lon], [toAirport.lat, toAirport.lon]];
         
-        // For direct routes, only show the airport markers
-        const fromMarker = L.marker([selectedFrom.lat, selectedFrom.lon], {
-          title: `${selectedFrom.code} - ${selectedFrom.name}`
+        // Add airport markers for direct route
+        const fromMarker = L.marker([fromAirport.lat, fromAirport.lon], {
+          title: `${fromAirport.code} - ${fromAirport.name}`
         }).bindPopup(`
           <div class="text-sm">
-            <p class="font-semibold">${selectedFrom.name}</p>
-            <p>${selectedFrom.code} - ${selectedFrom.icao}</p>
+            <p class="font-semibold">${fromAirport.name}</p>
+            <p>${fromAirport.code} - ${fromAirport.icao}</p>
             <p class="text-gray-600">Direct Route</p>
           </div>
         `);
         
-        const toMarker = L.marker([selectedTo.lat, selectedTo.lon], {
-          title: `${selectedTo.code} - ${selectedTo.name}`
+        const toMarker = L.marker([toAirport.lat, toAirport.lon], {
+          title: `${toAirport.code} - ${toAirport.name}`
         }).bindPopup(`
           <div class="text-sm">
-            <p class="font-semibold">${selectedTo.name}</p>
-            <p>${selectedTo.code} - ${selectedTo.icao}</p>
+            <p class="font-semibold">${toAirport.name}</p>
+            <p>${toAirport.code} - ${toAirport.icao}</p>
             <p class="text-gray-600">Direct Route</p>
           </div>
         `);
@@ -210,15 +166,30 @@ async function updateFlightPath() {
   }
 }
 
-// Add custom styles for waypoint markers
-const style = document.createElement('style');
-style.textContent = `
-  .waypoint-marker {
-    background: transparent;
-    border: none;
+// Initialize when the page loads
+document.addEventListener('DOMContentLoaded', () => {
+  initializeMap();
+  loadAirports();
+});
+
+// Save custom airports to localStorage
+const saveCustomAirports = () => {
+  const defaultAirportCodes = new Set(airports.filter(a => a.icao?.startsWith('K') || a.icao?.startsWith('MM') || a.icao === 'EGLL').map(a => a.code));
+  const customAirports = airports.filter(a => !defaultAirportCodes.has(a.code));
+  localStorage.setItem('customAirports', JSON.stringify(customAirports));
+};
+
+// Initialize dark mode from localStorage or system preference
+function initializeDarkMode() {
+  const darkModeEnabled = localStorage.getItem('darkMode') === 'true' ||
+    (!localStorage.getItem('darkMode') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  
+  if (darkModeEnabled) {
+    document.documentElement.classList.add('dark');
+  } else {
+    document.documentElement.classList.remove('dark');
   }
-`;
-document.head.appendChild(style);
+}
 
 // Calculate total distance along a path of coordinates
 function calculatePathDistance(coordinates) {
@@ -345,23 +316,36 @@ function haversine(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
-// Initialize when the page loads
-document.addEventListener('DOMContentLoaded', () => {
-  // Load airports from JSON file
-  loadAirports();
+// Function to find the best route using airways
+function findBestRoute(fromCode, toCode) {
+  // This function should return a route object with the following properties:
+  // - name: The name of the airway
+  // - airwayId: The ID of the airway
+  // - waypoints: An array of waypoints along the airway, each with lat, lon, and name properties
+  // For demonstration purposes, a simple route is returned
+  return {
+    name: 'Airway 123',
+    airwayId: 'AWY123',
+    waypoints: [
+      { lat: 39.8283, lon: -98.5795, name: 'Waypoint 1' },
+      { lat: 40.7128, lon: -74.0060, name: 'Waypoint 2' },
+      { lat: 41.8781, lon: -87.6298, name: 'Waypoint 3' }
+    ]
+  };
+}
 
-  initializeDarkMode();
-
-  setupAutocomplete('from-input', 'from-suggestions', (airport) => {
-    selectedFrom = airport;
-    updateFlightPath();
-  });
-
-  setupAutocomplete('to-input', 'to-suggestions', (airport) => {
-    selectedTo = airport;
-    updateFlightPath();
-  });
-});
+// Function to calculate the distance along a route
+function calculateRouteDistance(waypoints) {
+  let totalDistance = 0;
+  
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    const [lat1, lon1] = [waypoints[i].lat, waypoints[i].lon];
+    const [lat2, lon2] = [waypoints[i + 1].lat, waypoints[i + 1].lon];
+    totalDistance += haversine(lat1, lon1, lat2, lon2);
+  }
+  
+  return totalDistance;
+}
 
 document.getElementById("calculate-btn").addEventListener("click", async () => {
   if (!selectedFrom || !selectedTo) {
@@ -436,33 +420,22 @@ document.getElementById("calculate-btn").addEventListener("click", async () => {
   }
 });
 
-// Function to find the best route using airways
-function findBestRoute(fromCode, toCode) {
-  // This function should return a route object with the following properties:
-  // - name: The name of the airway
-  // - airwayId: The ID of the airway
-  // - waypoints: An array of waypoints along the airway, each with lat, lon, and name properties
-  // For demonstration purposes, a simple route is returned
-  return {
-    name: 'Airway 123',
-    airwayId: 'AWY123',
-    waypoints: [
-      { lat: 39.8283, lon: -98.5795, name: 'Waypoint 1' },
-      { lat: 40.7128, lon: -74.0060, name: 'Waypoint 2' },
-      { lat: 41.8781, lon: -87.6298, name: 'Waypoint 3' }
-    ]
-  };
-}
-
-// Function to calculate the distance along a route
-function calculateRouteDistance(waypoints) {
-  let totalDistance = 0;
-  
-  for (let i = 0; i < waypoints.length - 1; i++) {
-    const [lat1, lon1] = [waypoints[i].lat, waypoints[i].lon];
-    const [lat2, lon2] = [waypoints[i + 1].lat, waypoints[i + 1].lon];
-    totalDistance += haversine(lat1, lon1, lat2, lon2);
+// Add custom styles for waypoint markers
+const style = document.createElement('style');
+style.textContent = `
+  .waypoint-marker {
+    background: transparent;
+    border: none;
   }
-  
-  return totalDistance;
-}
+`;
+document.head.appendChild(style);
+
+setupAutocomplete('from-input', 'from-suggestions', (airport) => {
+  selectedFrom = airport;
+  updateFlightPath();
+});
+
+setupAutocomplete('to-input', 'to-suggestions', (airport) => {
+  selectedTo = airport;
+  updateFlightPath();
+});
