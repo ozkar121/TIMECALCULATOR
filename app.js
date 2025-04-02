@@ -12,10 +12,69 @@ async function loadAirports() {
     const response = await fetch('airports.json');
     airports = await response.json();
     console.log('Loaded airports:', airports.length);
-    initializeAutocomplete();
+    
+    // Initialize autocomplete after loading airports
+    setupAutocomplete('from-input', 'from-suggestions', (airport) => {
+      selectedFrom = airport;
+      updateFlightPath();
+    });
+
+    setupAutocomplete('to-input', 'to-suggestions', (airport) => {
+      selectedTo = airport;
+      updateFlightPath();
+    });
   } catch (error) {
     console.error('Error loading airports:', error);
   }
+}
+
+// Setup autocomplete for an input field
+function setupAutocomplete(inputId, suggestionsId, onSelect) {
+  const input = document.getElementById(inputId);
+  const suggestions = document.getElementById(suggestionsId);
+  
+  input.addEventListener('input', () => {
+    const value = input.value.toLowerCase();
+    suggestions.innerHTML = '';
+    
+    if (value.length < 2) {
+      suggestions.classList.add('hidden');
+      return;
+    }
+    
+    const matches = airports.filter(airport => 
+      airport.code.toLowerCase().includes(value) ||
+      airport.name.toLowerCase().includes(value)
+    ).slice(0, 5);
+    
+    if (matches.length > 0) {
+      suggestions.classList.remove('hidden');
+      matches.forEach(airport => {
+        const div = document.createElement('div');
+        div.className = 'suggestion-item';
+        div.innerHTML = `
+          <div class="text-sm">
+            <span class="font-semibold">${airport.code}</span> - ${airport.name}
+          </div>
+        `;
+        div.addEventListener('click', () => {
+          input.value = airport.code;
+          suggestions.classList.add('hidden');
+          onSelect(airport);
+        });
+        suggestions.appendChild(div);
+      });
+    } else {
+      suggestions.classList.add('hidden');
+    }
+  });
+  
+  // Hide suggestions when clicking outside
+  document.addEventListener('click', (e) => {
+    if (!input.contains(e.target) && !suggestions.contains(e.target)) {
+      suggestions.classList.add('hidden');
+    }
+  });
 }
 
 // Initialize map
@@ -39,7 +98,7 @@ async function updateFlightPath() {
 
   if (selectedFrom && selectedTo) {
     try {
-      // Add airport markers first
+      // Get airport data from our loaded airports
       const fromAirport = airports.find(a => a.code === selectedFrom.code);
       const toAirport = airports.find(a => a.code === selectedTo.code);
       
@@ -48,22 +107,55 @@ async function updateFlightPath() {
       }
 
       // Try to find a route using airways
-      const route = await findBestRoute(fromAirport, toAirport);
+      const route = await openAIPClient.getAirways(
+        { lat: fromAirport.lat, lon: fromAirport.lon },
+        { lat: toAirport.lat, lon: toAirport.lon }
+      );
       console.log('Found route:', route);
       
+      // Add airport markers first
+      const fromMarker = L.marker([fromAirport.lat, fromAirport.lon], {
+        title: `${fromAirport.code} - ${fromAirport.name}`
+      }).bindPopup(`
+        <div class="text-sm">
+          <p class="font-semibold">${fromAirport.name}</p>
+          <p>${fromAirport.code} - ${fromAirport.icao || ''}</p>
+          <p class="text-gray-600">Starting Point</p>
+        </div>
+      `);
+      
+      const toMarker = L.marker([toAirport.lat, toAirport.lon], {
+        title: `${toAirport.code} - ${toAirport.name}`
+      }).bindPopup(`
+        <div class="text-sm">
+          <p class="font-semibold">${toAirport.name}</p>
+          <p>${toAirport.code} - ${toAirport.icao || ''}</p>
+          <p class="text-gray-600">Destination</p>
+        </div>
+      `);
+      
+      markers.push(fromMarker, toMarker);
+      fromMarker.addTo(map);
+      toMarker.addTo(map);
+
       let pathCoordinates;
-      if (route && route.waypoints && route.waypoints.length > 0) {
+      if (route && route.length > 0) {
         // Use airway route with waypoints from API
-        pathCoordinates = route.waypoints.map(wp => [wp.lat, wp.lon]);
+        const allPoints = [
+          [fromAirport.lat, fromAirport.lon],
+          ...route.map(wp => [wp.lat, wp.lon]),
+          [toAirport.lat, toAirport.lon]
+        ];
+        
+        pathCoordinates = allPoints;
         
         // Add route information to the map
         const routeInfo = L.popup()
-          .setLatLng(pathCoordinates[Math.floor(pathCoordinates.length / 2)])
+          .setLatLng(allPoints[Math.floor(allPoints.length / 2)])
           .setContent(`
             <div class="text-sm">
-              <p class="font-semibold">${route.name}</p>
-              <p class="text-gray-600">Airway: ${route.airwayId}</p>
-              <p class="text-gray-600">${route.waypoints.length} waypoints</p>
+              <p class="font-semibold">Via Airways</p>
+              <p class="text-gray-600">${route.length} waypoints</p>
             </div>
           `);
         
@@ -74,79 +166,26 @@ async function updateFlightPath() {
           opacity: 0.8
         }).addTo(map).bindPopup(routeInfo);
 
-        // Add markers for airports and waypoints
-        const fromMarker = L.marker([fromAirport.lat, fromAirport.lon], {
-          title: `${fromAirport.code} - ${fromAirport.name}`
-        }).bindPopup(`
-          <div class="text-sm">
-            <p class="font-semibold">${fromAirport.name}</p>
-            <p>${fromAirport.code} - ${fromAirport.icao}</p>
-            <p class="text-gray-600">Starting Point</p>
-          </div>
-        `);
-        
-        const toMarker = L.marker([toAirport.lat, toAirport.lon], {
-          title: `${toAirport.code} - ${toAirport.name}`
-        }).bindPopup(`
-          <div class="text-sm">
-            <p class="font-semibold">${toAirport.name}</p>
-            <p>${toAirport.code} - ${toAirport.icao}</p>
-            <p class="text-gray-600">Destination</p>
-          </div>
-        `);
-        
-        markers.push(fromMarker, toMarker);
-        fromMarker.addTo(map);
-        toMarker.addTo(map);
-
-        // Add waypoint markers (excluding airports)
-        route.waypoints.forEach((wp, index) => {
-          if (index > 0 && index < route.waypoints.length - 1) {
-            const marker = L.marker([wp.lat, wp.lon], {
-              title: wp.name,
-              icon: L.divIcon({
-                className: 'waypoint-marker',
-                html: '<div class="w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>'
-              })
-            }).bindPopup(`
-              <div class="text-sm">
-                <p class="font-semibold">${wp.name}</p>
-                <p class="text-gray-600">${wp.type || 'Waypoint'}</p>
-                <p class="text-gray-600">Along ${route.name}</p>
-              </div>
-            `);
-            markers.push(marker);
-            marker.addTo(map);
-          }
+        // Add waypoint markers from API
+        route.forEach(wp => {
+          const marker = L.marker([wp.lat, wp.lon], {
+            title: wp.name,
+            icon: L.divIcon({
+              className: 'waypoint-marker',
+              html: '<div class="w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>'
+            })
+          }).bindPopup(`
+            <div class="text-sm">
+              <p class="font-semibold">${wp.name}</p>
+              <p class="text-gray-600">${wp.type || 'Waypoint'}</p>
+            </div>
+          `);
+          markers.push(marker);
+          marker.addTo(map);
         });
       } else {
         // Fall back to direct route between airports
         pathCoordinates = [[fromAirport.lat, fromAirport.lon], [toAirport.lat, toAirport.lon]];
-        
-        // Add airport markers for direct route
-        const fromMarker = L.marker([fromAirport.lat, fromAirport.lon], {
-          title: `${fromAirport.code} - ${fromAirport.name}`
-        }).bindPopup(`
-          <div class="text-sm">
-            <p class="font-semibold">${fromAirport.name}</p>
-            <p>${fromAirport.code} - ${fromAirport.icao}</p>
-            <p class="text-gray-600">Direct Route</p>
-          </div>
-        `);
-        
-        const toMarker = L.marker([toAirport.lat, toAirport.lon], {
-          title: `${toAirport.code} - ${toAirport.name}`
-        }).bindPopup(`
-          <div class="text-sm">
-            <p class="font-semibold">${toAirport.name}</p>
-            <p>${toAirport.code} - ${toAirport.icao}</p>
-            <p class="text-gray-600">Direct Route</p>
-          </div>
-        `);
-        
-        markers.push(fromMarker, toMarker);
-        fromMarker.addTo(map);
-        toMarker.addTo(map);
         
         flightPath = L.polyline(pathCoordinates, {
           className: 'flight-path',
@@ -171,6 +210,16 @@ document.addEventListener('DOMContentLoaded', () => {
   initializeMap();
   loadAirports();
 });
+
+// Add custom styles for waypoint markers
+const style = document.createElement('style');
+style.textContent = `
+  .waypoint-marker {
+    background: transparent;
+    border: none;
+  }
+`;
+document.head.appendChild(style);
 
 // Save custom airports to localStorage
 const saveCustomAirports = () => {
@@ -358,15 +407,18 @@ document.getElementById("calculate-btn").addEventListener("click", async () => {
 
   try {
     // Try to find a route using airways
-    const route = await findBestRoute(selectedFrom, selectedTo);
+    const route = await openAIPClient.getAirways(
+      { lat: selectedFrom.lat, lon: selectedFrom.lon },
+      { lat: selectedTo.lat, lon: selectedTo.lon }
+    );
     console.log('Calculating with route:', route);
     
     let distance, routeType, waypoints;
     if (route) {
       // Calculate distance along airway route
-      distance = calculateRouteDistance(route.waypoints);
-      routeType = `Via ${route.name} (${route.airwayId})`;
-      waypoints = route.waypoints.map(wp => wp.name).join(' → ');
+      distance = calculateRouteDistance(route);
+      routeType = `Via Airways`;
+      waypoints = route.map(wp => wp.name).join(' → ');
     } else {
       // Calculate direct distance
       distance = haversine(selectedFrom.lat, selectedFrom.lon, selectedTo.lat, selectedTo.lon);
@@ -385,12 +437,12 @@ document.getElementById("calculate-btn").addEventListener("click", async () => {
           <div>
             <p class="text-sm text-gray-600 dark:text-gray-400">From</p>
             <p class="font-semibold">${selectedFrom.name}</p>
-            <p class="text-sm">${selectedFrom.code} - ${selectedFrom.icao}</p>
+            <p class="text-sm">${selectedFrom.code} - ${selectedFrom.icao || ''}</p>
           </div>
           <div>
             <p class="text-sm text-gray-600 dark:text-gray-400">To</p>
             <p class="font-semibold">${selectedTo.name}</p>
-            <p class="text-sm">${selectedTo.code} - ${selectedTo.icao}</p>
+            <p class="text-sm">${selectedTo.code} - ${selectedTo.icao || ''}</p>
           </div>
         </div>
         <div class="border-t dark:border-gray-600 my-4"></div>
@@ -418,24 +470,4 @@ document.getElementById("calculate-btn").addEventListener("click", async () => {
       </div>
     `;
   }
-});
-
-// Add custom styles for waypoint markers
-const style = document.createElement('style');
-style.textContent = `
-  .waypoint-marker {
-    background: transparent;
-    border: none;
-  }
-`;
-document.head.appendChild(style);
-
-setupAutocomplete('from-input', 'from-suggestions', (airport) => {
-  selectedFrom = airport;
-  updateFlightPath();
-});
-
-setupAutocomplete('to-input', 'to-suggestions', (airport) => {
-  selectedTo = airport;
-  updateFlightPath();
 });

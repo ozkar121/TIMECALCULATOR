@@ -5,17 +5,27 @@ class OpenAIPClient {
         this.cache = new Map();
     }
 
-    // Get navaids within a bounding box
-    async getNavaidsInBox(bounds) {
-        const { north, south, east, west } = bounds;
-        const cacheKey = `navaids-${north}-${south}-${east}-${west}`;
+    async getAirways(fromPoint, toPoint) {
+        // Calculate a bounding box that includes both points with some margin
+        const margin = 2; // degrees
+        const bounds = {
+            north: Math.max(fromPoint.lat, toPoint.lat) + margin,
+            south: Math.min(fromPoint.lat, toPoint.lat) - margin,
+            east: Math.max(fromPoint.lon, toPoint.lon) + margin,
+            west: Math.min(fromPoint.lon, toPoint.lon) - margin
+        };
+
+        // Create cache key for this request
+        const cacheKey = `airways-${bounds.north}-${bounds.south}-${bounds.east}-${bounds.west}`;
         
+        // Check cache first
         if (this.cache.has(cacheKey)) {
             return this.cache.get(cacheKey);
         }
 
         try {
-            const response = await fetch(`${this.baseUrl}/navaids/search?bbox=${west},${south},${east},${north}`, {
+            // Fetch navaids in the bounding box
+            const response = await fetch(`${this.baseUrl}/navaids/search?bbox=${bounds.west},${bounds.south},${bounds.east},${bounds.north}`, {
                 headers: {
                     'X-API-Key': this.apiKey,
                     'Accept': 'application/json'
@@ -27,86 +37,54 @@ class OpenAIPClient {
             }
 
             const data = await response.json();
-            this.cache.set(cacheKey, data.features || []);
-            return data.features || [];
-        } catch (error) {
-            console.error('Error fetching navaids:', error);
-            return [];
-        }
-    }
+            const navaids = data.features || [];
 
-    // Get airways between two points
-    async getAirways(fromPoint, toPoint) {
-        // Calculate a bounding box that includes both points with some margin
-        const margin = 2; // degrees
-        const bounds = {
-            north: Math.max(fromPoint.lat, toPoint.lat) + margin,
-            south: Math.min(fromPoint.lat, toPoint.lat) - margin,
-            east: Math.max(fromPoint.lon, toPoint.lon) + margin,
-            west: Math.min(fromPoint.lon, toPoint.lon) - margin
-        };
+            // Process navaids into waypoints
+            const waypoints = navaids.map(navaid => ({
+                lat: navaid.geometry.coordinates[1],
+                lon: navaid.geometry.coordinates[0],
+                name: navaid.properties.name || navaid.properties.ident,
+                type: navaid.properties.type,
+                ident: navaid.properties.ident
+            }));
 
-        try {
-            // Get all navaids in the bounding box
-            const navaids = await this.getNavaidsInBox(bounds);
-            console.log('Fetched navaids:', navaids);
+            // Sort waypoints by distance from start to end
+            const sortedWaypoints = this.sortWaypointsByRoute(waypoints, fromPoint, toPoint);
             
-            // Process navaids to find potential airways
-            return this.processNavaidsIntoAirways(navaids, fromPoint, toPoint);
+            // Cache the result
+            this.cache.set(cacheKey, sortedWaypoints);
+            
+            return sortedWaypoints;
         } catch (error) {
-            console.error('Error getting airways:', error);
+            console.error('Error fetching airways:', error);
             return [];
         }
     }
 
-    // Process navaids into airways
-    processNavaidsIntoAirways(navaids, fromPoint, toPoint) {
-        // Group navaids by airway identifier
-        const airwayGroups = new Map();
-        
-        navaids.forEach(navaid => {
-            const props = navaid.properties;
-            if (props.airways && Array.isArray(props.airways)) {
-                props.airways.forEach(airway => {
-                    if (!airwayGroups.has(airway)) {
-                        airwayGroups.set(airway, []);
-                    }
-                    airwayGroups.get(airway).push({
-                        name: props.name || props.ident,
-                        lat: navaid.geometry.coordinates[1],
-                        lon: navaid.geometry.coordinates[0],
-                        type: props.type
-                    });
-                });
-            }
+    sortWaypointsByRoute(waypoints, fromPoint, toPoint) {
+        // Filter waypoints that are roughly along the route
+        const directDistance = this.calculateDistance(fromPoint, toPoint);
+        const maxDeviation = directDistance * 0.3; // Allow 30% deviation from direct route
+
+        const filteredWaypoints = waypoints.filter(wp => {
+            const distanceViaPoint = 
+                this.calculateDistance(fromPoint, wp) +
+                this.calculateDistance(wp, toPoint);
+            return distanceViaPoint <= directDistance + maxDeviation;
         });
 
-        console.log('Airway groups:', airwayGroups);
-
-        // Convert groups into our airway format
-        const airways = [];
-        for (const [identifier, waypoints] of airwayGroups) {
-            // Only include airways with at least 2 waypoints
-            if (waypoints.length >= 2) {
-                // Sort waypoints by distance from start point
-                waypoints.sort((a, b) => {
-                    const distA = this.calculateDistance(fromPoint, a);
-                    const distB = this.calculateDistance(fromPoint, b);
-                    return distA - distB;
-                });
-
-                airways.push({
-                    id: identifier,
-                    name: `Airway ${identifier}`,
-                    waypoints
-                });
-            }
-        }
-
-        return airways;
+        // Sort waypoints by their total path distance
+        return filteredWaypoints.sort((a, b) => {
+            const distanceViaA = 
+                this.calculateDistance(fromPoint, a) +
+                this.calculateDistance(a, toPoint);
+            const distanceViaB = 
+                this.calculateDistance(fromPoint, b) +
+                this.calculateDistance(b, toPoint);
+            return distanceViaA - distanceViaB;
+        });
     }
 
-    // Calculate distance between two points (Haversine formula)
     calculateDistance(point1, point2) {
         const R = 6371; // Earth's radius in km
         const dLat = (point2.lat - point1.lat) * Math.PI / 180;
