@@ -1,9 +1,7 @@
-import config from './config.js';
-
 class OpenAIPClient {
     constructor() {
-        this.baseUrl = config.OPENAIP_BASE_URL;
-        this.apiKey = config.OPENAIP_API_KEY;
+        this.baseUrl = 'https://api.openaip.net/api/v1';
+        this.apiKey = '5516225dce93df6452489774ee5a3bd3';
         this.cache = new Map();
     }
 
@@ -17,20 +15,20 @@ class OpenAIPClient {
         }
 
         try {
-            const response = await fetch(`${this.baseUrl}/navaids?bounds=${west},${south},${east},${north}`, {
+            const response = await fetch(`${this.baseUrl}/navaids/search?bbox=${west},${south},${east},${north}`, {
                 headers: {
-                    'Authorization': `Bearer ${this.apiKey}`,
+                    'X-API-Key': this.apiKey,
                     'Accept': 'application/json'
                 }
             });
 
             if (!response.ok) {
-                throw new Error(`OpenAIP API error: ${response.statusText}`);
+                throw new Error(`OpenAIP API error: ${response.status} - ${response.statusText}`);
             }
 
             const data = await response.json();
-            this.cache.set(cacheKey, data);
-            return data;
+            this.cache.set(cacheKey, data.features || []);
+            return data.features || [];
         } catch (error) {
             console.error('Error fetching navaids:', error);
             return [];
@@ -48,11 +46,17 @@ class OpenAIPClient {
             west: Math.min(fromPoint.lon, toPoint.lon) - margin
         };
 
-        // Get all navaids in the bounding box
-        const navaids = await this.getNavaidsInBox(bounds);
-        
-        // Process navaids to find potential airways
-        return this.processNavaidsIntoAirways(navaids, fromPoint, toPoint);
+        try {
+            // Get all navaids in the bounding box
+            const navaids = await this.getNavaidsInBox(bounds);
+            console.log('Fetched navaids:', navaids);
+            
+            // Process navaids to find potential airways
+            return this.processNavaidsIntoAirways(navaids, fromPoint, toPoint);
+        } catch (error) {
+            console.error('Error getting airways:', error);
+            return [];
+        }
     }
 
     // Process navaids into airways
@@ -61,36 +65,42 @@ class OpenAIPClient {
         const airwayGroups = new Map();
         
         navaids.forEach(navaid => {
-            if (navaid.airways) {
-                navaid.airways.forEach(airway => {
-                    if (!airwayGroups.has(airway.identifier)) {
-                        airwayGroups.set(airway.identifier, []);
+            const props = navaid.properties;
+            if (props.airways && Array.isArray(props.airways)) {
+                props.airways.forEach(airway => {
+                    if (!airwayGroups.has(airway)) {
+                        airwayGroups.set(airway, []);
                     }
-                    airwayGroups.get(airway.identifier).push({
-                        name: navaid.identifier,
-                        lat: navaid.latitude,
-                        lon: navaid.longitude,
-                        type: navaid.type
+                    airwayGroups.get(airway).push({
+                        name: props.name || props.ident,
+                        lat: navaid.geometry.coordinates[1],
+                        lon: navaid.geometry.coordinates[0],
+                        type: props.type
                     });
                 });
             }
         });
 
+        console.log('Airway groups:', airwayGroups);
+
         // Convert groups into our airway format
         const airways = [];
         for (const [identifier, waypoints] of airwayGroups) {
-            // Sort waypoints by distance from start point
-            waypoints.sort((a, b) => {
-                const distA = this.calculateDistance(fromPoint, a);
-                const distB = this.calculateDistance(fromPoint, b);
-                return distA - distB;
-            });
+            // Only include airways with at least 2 waypoints
+            if (waypoints.length >= 2) {
+                // Sort waypoints by distance from start point
+                waypoints.sort((a, b) => {
+                    const distA = this.calculateDistance(fromPoint, a);
+                    const distB = this.calculateDistance(fromPoint, b);
+                    return distA - distB;
+                });
 
-            airways.push({
-                id: identifier,
-                name: `Airway ${identifier}`,
-                waypoints
-            });
+                airways.push({
+                    id: identifier,
+                    name: `Airway ${identifier}`,
+                    waypoints
+                });
+            }
         }
 
         return airways;

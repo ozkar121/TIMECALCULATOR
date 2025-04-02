@@ -95,53 +95,58 @@ function initializeMap() {
 }
 
 // Update flight path on map
-function updateFlightPath() {
+async function updateFlightPath() {
   if (flightPath) {
     map.removeLayer(flightPath);
   }
 
   if (selectedFrom && selectedTo) {
-    // Try to find a route using airways
-    const route = findBestRoute(selectedFrom.code, selectedTo.code);
-    
-    let pathCoordinates;
-    if (route) {
-      // Use airway route
-      pathCoordinates = route.waypoints.map(wp => [wp.lat, wp.lon]);
+    try {
+      // Try to find a route using airways
+      const route = await findBestRoute(selectedFrom, selectedTo);
+      console.log('Found route:', route);
       
-      // Add route information to the map
-      const routeInfo = L.popup()
-        .setLatLng(pathCoordinates[Math.floor(pathCoordinates.length / 2)])
-        .setContent(`
-          <div class="text-sm">
-            <p class="font-semibold">${route.name}</p>
-            <p class="text-gray-600">Airway: ${route.airwayId}</p>
-            <p class="text-gray-600">${route.waypoints.length} waypoints</p>
-          </div>
-        `);
-      
-      flightPath = L.polyline(pathCoordinates, {
-        className: 'flight-path',
-        color: '#3b82f6',
-        weight: 3,
-        opacity: 0.8
-      }).addTo(map).bindPopup(routeInfo);
-    } else {
-      // Fall back to direct route
-      pathCoordinates = [[selectedFrom.lat, selectedFrom.lon], [selectedTo.lat, selectedTo.lon]];
-      
-      flightPath = L.polyline(pathCoordinates, {
-        className: 'flight-path',
-        color: '#3b82f6',
-        weight: 2,
-        dashArray: '5,10',
-        opacity: 0.6
-      }).addTo(map);
-    }
+      let pathCoordinates;
+      if (route) {
+        // Use airway route
+        pathCoordinates = route.waypoints.map(wp => [wp.lat, wp.lon]);
+        
+        // Add route information to the map
+        const routeInfo = L.popup()
+          .setLatLng(pathCoordinates[Math.floor(pathCoordinates.length / 2)])
+          .setContent(`
+            <div class="text-sm">
+              <p class="font-semibold">${route.name}</p>
+              <p class="text-gray-600">Airway: ${route.airwayId}</p>
+              <p class="text-gray-600">${route.waypoints.length} waypoints</p>
+            </div>
+          `);
+        
+        flightPath = L.polyline(pathCoordinates, {
+          className: 'flight-path',
+          color: '#3b82f6',
+          weight: 3,
+          opacity: 0.8
+        }).addTo(map).bindPopup(routeInfo);
+      } else {
+        // Fall back to direct route
+        pathCoordinates = [[selectedFrom.lat, selectedFrom.lon], [selectedTo.lat, selectedTo.lon]];
+        
+        flightPath = L.polyline(pathCoordinates, {
+          className: 'flight-path',
+          color: '#3b82f6',
+          weight: 2,
+          dashArray: '5,10',
+          opacity: 0.6
+        }).addTo(map);
+      }
 
-    // Fit map bounds to show the entire route
-    const bounds = L.latLngBounds(pathCoordinates);
-    map.fitBounds(bounds, { padding: [50, 50] });
+      // Fit map bounds to show the entire route
+      const bounds = L.latLngBounds(pathCoordinates);
+      map.fitBounds(bounds, { padding: [50, 50] });
+    } catch (error) {
+      console.error('Error updating flight path:', error);
+    }
   }
 }
 
@@ -288,7 +293,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-document.getElementById("calculate-btn").addEventListener("click", () => {
+document.getElementById("calculate-btn").addEventListener("click", async () => {
   if (!selectedFrom || !selectedTo) {
     document.getElementById("results").innerHTML = "<p class='text-red-500 dark:text-red-400'>Please select both airports.</p>";
     return;
@@ -297,57 +302,68 @@ document.getElementById("calculate-btn").addEventListener("click", () => {
   const speed = parseFloat(document.getElementById("speed-input").value);
   const extra = parseFloat(document.getElementById("extra-minutes").value);
 
-  // Try to find a route using airways
-  const route = findBestRoute(selectedFrom.code, selectedTo.code);
-  
-  let distance, routeType, waypoints;
-  if (route) {
-    // Calculate distance along airway route
-    distance = calculateRouteDistance(route.waypoints);
-    routeType = `Via ${route.name} (${route.airwayId})`;
-    waypoints = route.waypoints.map(wp => wp.name).join(' → ');
-  } else {
-    // Calculate direct distance
-    distance = haversine(selectedFrom.lat, selectedFrom.lon, selectedTo.lat, selectedTo.lon);
-    routeType = 'Direct Route';
-    waypoints = `${selectedFrom.code} → ${selectedTo.code}`;
+  try {
+    // Try to find a route using airways
+    const route = await findBestRoute(selectedFrom, selectedTo);
+    console.log('Calculating with route:', route);
+    
+    let distance, routeType, waypoints;
+    if (route) {
+      // Calculate distance along airway route
+      distance = calculateRouteDistance(route.waypoints);
+      routeType = `Via ${route.name} (${route.airwayId})`;
+      waypoints = route.waypoints.map(wp => wp.name).join(' → ');
+    } else {
+      // Calculate direct distance
+      distance = haversine(selectedFrom.lat, selectedFrom.lon, selectedTo.lat, selectedTo.lon);
+      routeType = 'Direct Route';
+      waypoints = `${selectedFrom.code} → ${selectedTo.code}`;
+    }
+
+    const nm = distance / 1.852;
+    const time = (nm / speed * 60) + extra;
+    const hours = Math.floor(time / 60);
+    const minutes = Math.round(time % 60);
+
+    document.getElementById("results").innerHTML = `
+      <div class="space-y-2">
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <p class="text-sm text-gray-600 dark:text-gray-400">From</p>
+            <p class="font-semibold">${selectedFrom.name}</p>
+            <p class="text-sm">${selectedFrom.code} - ${selectedFrom.icao}</p>
+          </div>
+          <div>
+            <p class="text-sm text-gray-600 dark:text-gray-400">To</p>
+            <p class="font-semibold">${selectedTo.name}</p>
+            <p class="text-sm">${selectedTo.code} - ${selectedTo.icao}</p>
+          </div>
+        </div>
+        <div class="border-t dark:border-gray-600 my-4"></div>
+        <div>
+          <p class="text-sm text-gray-600 dark:text-gray-400">Route Type</p>
+          <p class="font-semibold">${routeType}</p>
+          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">${waypoints}</p>
+        </div>
+        <div>
+          <p class="text-sm text-gray-600 dark:text-gray-400">Distance</p>
+          <p class="font-semibold">${distance.toFixed(1)} km / ${nm.toFixed(1)} NM</p>
+        </div>
+        <div>
+          <p class="text-sm text-gray-600 dark:text-gray-400">Estimated Flight Time</p>
+          <p class="font-semibold text-xl">${hours}h ${minutes}m</p>
+        </div>
+      </div>
+    `;
+  } catch (error) {
+    console.error('Error calculating route:', error);
+    document.getElementById("results").innerHTML = `
+      <div class="text-red-500 dark:text-red-400">
+        <p>Error calculating route. Please try again.</p>
+        <p class="text-sm mt-2">Error details: ${error.message}</p>
+      </div>
+    `;
   }
-
-  const nm = distance / 1.852;
-  const time = (nm / speed * 60) + extra;
-  const hours = Math.floor(time / 60);
-  const minutes = Math.round(time % 60);
-
-  document.getElementById("results").innerHTML = `
-    <div class="space-y-2">
-      <div class="grid grid-cols-2 gap-4">
-        <div>
-          <p class="text-sm text-gray-600 dark:text-gray-400">From</p>
-          <p class="font-semibold">${selectedFrom.name}</p>
-          <p class="text-sm">${selectedFrom.code} - ${selectedFrom.icao}</p>
-        </div>
-        <div>
-          <p class="text-sm text-gray-600 dark:text-gray-400">To</p>
-          <p class="font-semibold">${selectedTo.name}</p>
-          <p class="text-sm">${selectedTo.code} - ${selectedTo.icao}</p>
-        </div>
-      </div>
-      <div class="border-t dark:border-gray-600 my-4"></div>
-      <div>
-        <p class="text-sm text-gray-600 dark:text-gray-400">Route Type</p>
-        <p class="font-semibold">${routeType}</p>
-        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">${waypoints}</p>
-      </div>
-      <div>
-        <p class="text-sm text-gray-600 dark:text-gray-400">Distance</p>
-        <p class="font-semibold">${distance.toFixed(1)} km / ${nm.toFixed(1)} NM</p>
-      </div>
-      <div>
-        <p class="text-sm text-gray-600 dark:text-gray-400">Estimated Flight Time</p>
-        <p class="font-semibold text-xl">${hours}h ${minutes}m</p>
-      </div>
-    </div>
-  `;
 });
 
 // Function to find the best route using airways
