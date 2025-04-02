@@ -7,7 +7,10 @@
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script defer src="app.js"></script>
+  <script type="module" src="config.js"></script>
+  <script type="module" src="openaip.js"></script>
+  <script type="module" src="airways.js"></script>
+  <script type="module" src="app.js"></script>
   <style>
     .hero-bg {
       background-image: url('https://images.unsplash.com/photo-1581350845039-7f05f843f6b1?q=80&w=2000');
@@ -61,106 +64,114 @@
   </div>
 
   <div class="container mx-auto px-4 pb-8">
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-      <!-- Main Form -->
-      <div class="lg:col-span-2 bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-        <div class="flex justify-between items-center mb-6">
-          <h2 class="text-2xl font-semibold text-gray-800 dark:text-white">Calculate Flight Time</h2>
-          <button id="theme-toggle" class="p-2 rounded-lg bg-gray-200 dark:bg-gray-700">
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
-                d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z">
-              </path>
-            </svg>
-          </button>
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div class="relative">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">From Airport</label>
-            <input type="text" id="from-input" 
-              class="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-              placeholder="Type airport code or name">
-            <div id="from-suggestions" class="absolute z-10 w-full mt-1 bg-white dark:bg-gray-700 rounded-lg shadow-lg hidden"></div>
-          </div>
-
-          <div class="relative">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">To Airport</label>
-            <input type="text" id="to-input"
-              class="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-              placeholder="Type airport code or name">
-            <div id="to-suggestions" class="absolute z-10 w-full mt-1 bg-white dark:bg-gray-700 rounded-lg shadow-lg hidden"></div>
-          </div>
-
-          <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Aircraft Speed (knots)</label>
-            <input type="number" id="speed-input" value="450"
-              class="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white">
-          </div>
-
-          <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Extra Time (minutes)</label>
-            <input type="number" id="extra-minutes" value="30"
-              class="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white">
-          </div>
-        </div>
-
-        <button id="calculate-btn"
-          class="w-full mt-6 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors">
-          Calculate Flight Time
-        </button>
-
-        <div id="results" class="mt-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg"></div>
-      </div>
-
-      <!-- Airport Management -->
-      <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-        <h2 class="text-2xl font-semibold text-gray-800 dark:text-white mb-6">Add Custom Airport</h2>
-        <form id="add-airport-form" class="space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Airport Code (IATA)</label>
-            <input type="text" id="new-code" maxlength="3" required
-              class="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white uppercase"
-              placeholder="e.g. LAX">
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ICAO Code</label>
-            <input type="text" id="new-icao" maxlength="4" required
-              class="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white uppercase"
-              placeholder="e.g. KLAX">
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Airport Name</label>
-            <input type="text" id="new-name" required
-              class="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-              placeholder="e.g. Los Angeles International Airport">
-          </div>
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Latitude</label>
-              <input type="number" id="new-lat" step="0.0001" required
-                class="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                placeholder="e.g. 33.9425">
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Longitude</label>
-              <input type="number" id="new-lon" step="0.0001" required
-                class="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                placeholder="e.g. -118.4081">
-            </div>
-          </div>
-          <button type="submit"
-            class="w-full bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition-colors">
-            Add Airport
-          </button>
-        </form>
-      </div>
+    <!-- Loading State -->
+    <div id="loading" class="text-center py-12">
+      <div class="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mx-auto mb-4"></div>
+      <p class="text-gray-600 dark:text-gray-400">Loading airports data...</p>
     </div>
 
-    <!-- Map -->
-    <div class="mt-8 bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
-      <h2 class="text-2xl font-semibold text-gray-800 dark:text-white mb-4">Flight Route Map</h2>
-      <div id="map"></div>
+    <div id="main-content" class="hidden">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <!-- Main Form -->
+        <div class="lg:col-span-2 bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+          <div class="flex justify-between items-center mb-6">
+            <h2 class="text-2xl font-semibold text-gray-800 dark:text-white">Calculate Flight Time</h2>
+            <button id="theme-toggle" class="p-2 rounded-lg bg-gray-200 dark:bg-gray-700">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" 
+                  d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z">
+                </path>
+              </svg>
+            </button>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="relative">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">From Airport</label>
+              <input type="text" id="from-input" 
+                class="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                placeholder="Type airport code or name">
+              <div id="from-suggestions" class="absolute z-10 w-full mt-1 bg-white dark:bg-gray-700 rounded-lg shadow-lg hidden"></div>
+            </div>
+
+            <div class="relative">
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">To Airport</label>
+              <input type="text" id="to-input"
+                class="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                placeholder="Type airport code or name">
+              <div id="to-suggestions" class="absolute z-10 w-full mt-1 bg-white dark:bg-gray-700 rounded-lg shadow-lg hidden"></div>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Aircraft Speed (knots)</label>
+              <input type="number" id="speed-input" value="450"
+                class="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Extra Time (minutes)</label>
+              <input type="number" id="extra-minutes" value="30"
+                class="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white">
+            </div>
+          </div>
+
+          <button id="calculate-btn"
+            class="w-full mt-6 bg-blue-600 text-white py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors">
+            Calculate Flight Time
+          </button>
+
+          <div id="results" class="mt-6 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg"></div>
+        </div>
+
+        <!-- Airport Management -->
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+          <h2 class="text-2xl font-semibold text-gray-800 dark:text-white mb-6">Add Custom Airport</h2>
+          <form id="add-airport-form" class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Airport Code (IATA)</label>
+              <input type="text" id="new-code" maxlength="3" required
+                class="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white uppercase"
+                placeholder="e.g. LAX">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">ICAO Code</label>
+              <input type="text" id="new-icao" maxlength="4" required
+                class="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white uppercase"
+                placeholder="e.g. KLAX">
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Airport Name</label>
+              <input type="text" id="new-name" required
+                class="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                placeholder="e.g. Los Angeles International Airport">
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Latitude</label>
+                <input type="number" id="new-lat" step="0.0001" required
+                  class="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  placeholder="e.g. 33.9425">
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Longitude</label>
+                <input type="number" id="new-lon" step="0.0001" required
+                  class="w-full p-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  placeholder="e.g. -118.4081">
+              </div>
+            </div>
+            <button type="submit"
+              class="w-full bg-green-600 text-white py-2 px-4 rounded-lg hover:bg-green-700 transition-colors">
+              Add Airport
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Map -->
+      <div class="mt-8 bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6">
+        <h2 class="text-2xl font-semibold text-gray-800 dark:text-white mb-4">Flight Route Map</h2>
+        <div id="map"></div>
+      </div>
     </div>
   </div>
 </body>

@@ -1,38 +1,54 @@
-// Major world airports data
-let airports = [
-  // US Airports
-  { code: "ATL", icao: "KATL", name: "Hartsfield-Jackson Atlanta International Airport", lat: 33.6367, lon: -84.4281 },
-  { code: "LAX", icao: "KLAX", name: "Los Angeles International Airport", lat: 33.9425, lon: -118.4081 },
-  { code: "ORD", icao: "KORD", name: "O'Hare International Airport", lat: 41.9786, lon: -87.9048 },
-  { code: "LHR", icao: "EGLL", name: "London Heathrow Airport", lat: 51.4700, lon: -0.4543 },
-  { code: "JFK", icao: "KJFK", name: "John F. Kennedy International Airport", lat: 40.6413, lon: -73.7781 },
-  { code: "DFW", icao: "KDFW", name: "Dallas/Fort Worth International Airport", lat: 32.8968, lon: -97.0380 },
-  { code: "DEN", icao: "KDEN", name: "Denver International Airport", lat: 39.8561, lon: -104.6737 },
-  { code: "SFO", icao: "KSFO", name: "San Francisco International Airport", lat: 37.6188, lon: -122.3750 },
-  { code: "SEA", icao: "KSEA", name: "Seattle-Tacoma International Airport", lat: 47.4502, lon: -122.3088 },
-  { code: "MIA", icao: "KMIA", name: "Miami International Airport", lat: 25.7932, lon: -80.2906 },
-  // Mexican Airports
-  { code: "MEX", icao: "MMMX", name: "Benito Juárez International Airport", lat: 19.4363, lon: -99.0721 },
-  { code: "CUN", icao: "MMUN", name: "Cancún International Airport", lat: 21.0365, lon: -86.8771 },
-  { code: "GDL", icao: "MMGL", name: "Guadalajara International Airport", lat: 20.5218, lon: -103.3111 },
-  { code: "MTY", icao: "MMMY", name: "Monterrey International Airport", lat: 25.7785, lon: -100.1067 },
-  { code: "TIJ", icao: "MMTJ", name: "Tijuana International Airport", lat: 32.5411, lon: -116.9700 },
-  { code: "SJD", icao: "MMSD", name: "Los Cabos International Airport", lat: 23.1518, lon: -109.7215 },
-  { code: "CJS", icao: "MMCS", name: "Ciudad Juárez International Airport", lat: 31.6361, lon: -106.4289 },
-  { code: "MID", icao: "MMMD", name: "Mérida International Airport", lat: 20.9370, lon: -89.6577 },
-  { code: "BJX", icao: "MMLO", name: "Guanajuato International Airport", lat: 20.9935, lon: -101.4815 },
-  { code: "HMO", icao: "MMHO", name: "Hermosillo International Airport", lat: 29.0959, lon: -111.0479 }
-];
+// Initialize airports array
+let airports = [];
 
-// Load custom airports from localStorage
-const loadCustomAirports = () => {
-  const customAirports = JSON.parse(localStorage.getItem('customAirports') || '[]');
-  airports = [...airports, ...customAirports];
-};
+// Load airports from JSON file
+async function loadAirports() {
+  try {
+    const response = await fetch('airports.json');
+    const allAirports = await response.json();
+    
+    // Filter for major airports and format the data
+    airports = allAirports
+      .filter(airport => 
+        // Include airports with IATA code and coordinates
+        airport.code && airport.lat && airport.lon &&
+        // Filter for major airports (you can adjust these criteria)
+        (airport.icao?.startsWith('K') || // US airports
+         airport.icao?.startsWith('MM') || // Mexican airports
+         airport.icao === 'EGLL') // London Heathrow
+      )
+      .map(airport => ({
+        code: airport.code,
+        icao: airport.icao || '',
+        name: airport.name,
+        lat: parseFloat(airport.lat),
+        lon: parseFloat(airport.lon)
+      }));
+
+    // Load any custom airports
+    const customAirports = JSON.parse(localStorage.getItem('customAirports') || '[]');
+    airports = [...airports, ...customAirports];
+
+    // Initialize the map after airports are loaded
+    initializeMap();
+    
+    // Hide loading and show main content
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('main-content').classList.remove('hidden');
+  } catch (error) {
+    console.error('Error loading airports:', error);
+    document.getElementById('loading').innerHTML = `
+      <div class="text-red-500 dark:text-red-400 text-center">
+        <p class="text-xl mb-2">Error loading airports data</p>
+        <p class="text-sm">Please try refreshing the page</p>
+      </div>
+    `;
+  }
+}
 
 // Save custom airports to localStorage
 const saveCustomAirports = () => {
-  const defaultAirportCodes = new Set(airports.slice(0, 20).map(a => a.code));
+  const defaultAirportCodes = new Set(airports.filter(a => a.icao?.startsWith('K') || a.icao?.startsWith('MM') || a.icao === 'EGLL').map(a => a.code));
   const customAirports = airports.filter(a => !defaultAirportCodes.has(a.code));
   localStorage.setItem('customAirports', JSON.stringify(customAirports));
 };
@@ -85,18 +101,61 @@ function updateFlightPath() {
   }
 
   if (selectedFrom && selectedTo) {
-    flightPath = L.polyline(
-      [[selectedFrom.lat, selectedFrom.lon], [selectedTo.lat, selectedTo.lon]],
-      { className: 'flight-path', color: '#3b82f6', weight: 2 }
-    ).addTo(map);
+    // Try to find a route using airways
+    const route = findBestRoute(selectedFrom.code, selectedTo.code);
+    
+    let pathCoordinates;
+    if (route) {
+      // Use airway route
+      pathCoordinates = route.waypoints.map(wp => [wp.lat, wp.lon]);
+      
+      // Add route information to the map
+      const routeInfo = L.popup()
+        .setLatLng(pathCoordinates[Math.floor(pathCoordinates.length / 2)])
+        .setContent(`
+          <div class="text-sm">
+            <p class="font-semibold">${route.name}</p>
+            <p class="text-gray-600">Airway: ${route.airwayId}</p>
+            <p class="text-gray-600">${route.waypoints.length} waypoints</p>
+          </div>
+        `);
+      
+      flightPath = L.polyline(pathCoordinates, {
+        className: 'flight-path',
+        color: '#3b82f6',
+        weight: 3,
+        opacity: 0.8
+      }).addTo(map).bindPopup(routeInfo);
+    } else {
+      // Fall back to direct route
+      pathCoordinates = [[selectedFrom.lat, selectedFrom.lon], [selectedTo.lat, selectedTo.lon]];
+      
+      flightPath = L.polyline(pathCoordinates, {
+        className: 'flight-path',
+        color: '#3b82f6',
+        weight: 2,
+        dashArray: '5,10',
+        opacity: 0.6
+      }).addTo(map);
+    }
 
-    // Fit map bounds to show both airports
-    const bounds = L.latLngBounds(
-      [selectedFrom.lat, selectedFrom.lon],
-      [selectedTo.lat, selectedTo.lon]
-    );
+    // Fit map bounds to show the entire route
+    const bounds = L.latLngBounds(pathCoordinates);
     map.fitBounds(bounds, { padding: [50, 50] });
   }
+}
+
+// Calculate total distance along a path of coordinates
+function calculatePathDistance(coordinates) {
+  let totalDistance = 0;
+  
+  for (let i = 0; i < coordinates.length - 1; i++) {
+    const [lat1, lon1] = coordinates[i];
+    const [lat2, lon2] = coordinates[i + 1];
+    totalDistance += haversine(lat1, lon1, lat2, lon2);
+  }
+  
+  return totalDistance;
 }
 
 // Filter airports based on search query
@@ -213,11 +272,10 @@ function haversine(lat1, lon1, lat2, lon2) {
 
 // Initialize when the page loads
 document.addEventListener('DOMContentLoaded', () => {
-  // Load custom airports first
-  loadCustomAirports();
-  
+  // Load airports from JSON file
+  loadAirports();
+
   initializeDarkMode();
-  initializeMap();
 
   setupAutocomplete('from-input', 'from-suggestions', (airport) => {
     selectedFrom = airport;
@@ -239,7 +297,22 @@ document.getElementById("calculate-btn").addEventListener("click", () => {
   const speed = parseFloat(document.getElementById("speed-input").value);
   const extra = parseFloat(document.getElementById("extra-minutes").value);
 
-  const distance = haversine(selectedFrom.lat, selectedFrom.lon, selectedTo.lat, selectedTo.lon);
+  // Try to find a route using airways
+  const route = findBestRoute(selectedFrom.code, selectedTo.code);
+  
+  let distance, routeType, waypoints;
+  if (route) {
+    // Calculate distance along airway route
+    distance = calculateRouteDistance(route.waypoints);
+    routeType = `Via ${route.name} (${route.airwayId})`;
+    waypoints = route.waypoints.map(wp => wp.name).join(' → ');
+  } else {
+    // Calculate direct distance
+    distance = haversine(selectedFrom.lat, selectedFrom.lon, selectedTo.lat, selectedTo.lon);
+    routeType = 'Direct Route';
+    waypoints = `${selectedFrom.code} → ${selectedTo.code}`;
+  }
+
   const nm = distance / 1.852;
   const time = (nm / speed * 60) + extra;
   const hours = Math.floor(time / 60);
@@ -261,6 +334,11 @@ document.getElementById("calculate-btn").addEventListener("click", () => {
       </div>
       <div class="border-t dark:border-gray-600 my-4"></div>
       <div>
+        <p class="text-sm text-gray-600 dark:text-gray-400">Route Type</p>
+        <p class="font-semibold">${routeType}</p>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">${waypoints}</p>
+      </div>
+      <div>
         <p class="text-sm text-gray-600 dark:text-gray-400">Distance</p>
         <p class="font-semibold">${distance.toFixed(1)} km / ${nm.toFixed(1)} NM</p>
       </div>
@@ -271,3 +349,34 @@ document.getElementById("calculate-btn").addEventListener("click", () => {
     </div>
   `;
 });
+
+// Function to find the best route using airways
+function findBestRoute(fromCode, toCode) {
+  // This function should return a route object with the following properties:
+  // - name: The name of the airway
+  // - airwayId: The ID of the airway
+  // - waypoints: An array of waypoints along the airway, each with lat, lon, and name properties
+  // For demonstration purposes, a simple route is returned
+  return {
+    name: 'Airway 123',
+    airwayId: 'AWY123',
+    waypoints: [
+      { lat: 39.8283, lon: -98.5795, name: 'Waypoint 1' },
+      { lat: 40.7128, lon: -74.0060, name: 'Waypoint 2' },
+      { lat: 41.8781, lon: -87.6298, name: 'Waypoint 3' }
+    ]
+  };
+}
+
+// Function to calculate the distance along a route
+function calculateRouteDistance(waypoints) {
+  let totalDistance = 0;
+  
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    const [lat1, lon1] = [waypoints[i].lat, waypoints[i].lon];
+    const [lat2, lon2] = [waypoints[i + 1].lat, waypoints[i + 1].lon];
+    totalDistance += haversine(lat1, lon1, lat2, lon2);
+  }
+  
+  return totalDistance;
+}
