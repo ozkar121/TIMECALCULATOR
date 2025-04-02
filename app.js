@@ -77,10 +77,6 @@ function initializeMap() {
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: ' OpenStreetMap contributors'
   }).addTo(map);
-
-  // Clear any existing markers
-  markers.forEach(marker => map.removeLayer(marker));
-  markers.length = 0;
 }
 
 // Update markers and flight path on map
@@ -95,29 +91,6 @@ async function updateFlightPath() {
 
   if (selectedFrom && selectedTo) {
     try {
-      // Add markers for selected airports
-      const fromMarker = L.marker([selectedFrom.lat, selectedFrom.lon], {
-        title: `${selectedFrom.code} - ${selectedFrom.name}`
-      }).bindPopup(`
-        <div class="text-sm">
-          <p class="font-semibold">${selectedFrom.name}</p>
-          <p>${selectedFrom.code} - ${selectedFrom.icao}</p>
-        </div>
-      `);
-      
-      const toMarker = L.marker([selectedTo.lat, selectedTo.lon], {
-        title: `${selectedTo.code} - ${selectedTo.name}`
-      }).bindPopup(`
-        <div class="text-sm">
-          <p class="font-semibold">${selectedTo.name}</p>
-          <p>${selectedTo.code} - ${selectedTo.icao}</p>
-        </div>
-      `);
-      
-      markers.push(fromMarker, toMarker);
-      fromMarker.addTo(map);
-      toMarker.addTo(map);
-
       // Try to find a route using airways
       const route = await findBestRoute(selectedFrom, selectedTo);
       console.log('Found route:', route);
@@ -126,26 +99,6 @@ async function updateFlightPath() {
       if (route) {
         // Use airway route
         pathCoordinates = route.waypoints.map(wp => [wp.lat, wp.lon]);
-        
-        // Add markers for waypoints
-        route.waypoints.forEach((wp, index) => {
-          if (index > 0 && index < route.waypoints.length - 1) { // Skip first and last (airports)
-            const marker = L.marker([wp.lat, wp.lon], {
-              title: wp.name,
-              icon: L.divIcon({
-                className: 'waypoint-marker',
-                html: '<div class="w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>'
-              })
-            }).bindPopup(`
-              <div class="text-sm">
-                <p class="font-semibold">${wp.name}</p>
-                <p class="text-gray-600">${wp.type || 'Waypoint'}</p>
-              </div>
-            `);
-            markers.push(marker);
-            marker.addTo(map);
-          }
-        });
         
         // Add route information to the map
         const routeInfo = L.popup()
@@ -164,9 +117,80 @@ async function updateFlightPath() {
           weight: 3,
           opacity: 0.8
         }).addTo(map).bindPopup(routeInfo);
+
+        // Only add waypoint markers if route is found
+        route.waypoints.forEach((wp, index) => {
+          // Create marker based on point type
+          let marker;
+          if (index === 0) {
+            // Starting airport
+            marker = L.marker([wp.lat, wp.lon], {
+              title: `${selectedFrom.code} - ${selectedFrom.name}`
+            }).bindPopup(`
+              <div class="text-sm">
+                <p class="font-semibold">${selectedFrom.name}</p>
+                <p>${selectedFrom.code} - ${selectedFrom.icao}</p>
+                <p class="text-gray-600">Starting Point</p>
+              </div>
+            `);
+          } else if (index === route.waypoints.length - 1) {
+            // Ending airport
+            marker = L.marker([wp.lat, wp.lon], {
+              title: `${selectedTo.code} - ${selectedTo.name}`
+            }).bindPopup(`
+              <div class="text-sm">
+                <p class="font-semibold">${selectedTo.name}</p>
+                <p>${selectedTo.code} - ${selectedTo.icao}</p>
+                <p class="text-gray-600">Destination</p>
+              </div>
+            `);
+          } else {
+            // Waypoint
+            marker = L.marker([wp.lat, wp.lon], {
+              title: wp.name,
+              icon: L.divIcon({
+                className: 'waypoint-marker',
+                html: '<div class="w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>'
+              })
+            }).bindPopup(`
+              <div class="text-sm">
+                <p class="font-semibold">${wp.name}</p>
+                <p class="text-gray-600">${wp.type || 'Waypoint'}</p>
+                <p class="text-gray-600">Along ${route.name}</p>
+              </div>
+            `);
+          }
+          markers.push(marker);
+          marker.addTo(map);
+        });
       } else {
         // Fall back to direct route
         pathCoordinates = [[selectedFrom.lat, selectedFrom.lon], [selectedTo.lat, selectedTo.lon]];
+        
+        // For direct routes, only show the airport markers
+        const fromMarker = L.marker([selectedFrom.lat, selectedFrom.lon], {
+          title: `${selectedFrom.code} - ${selectedFrom.name}`
+        }).bindPopup(`
+          <div class="text-sm">
+            <p class="font-semibold">${selectedFrom.name}</p>
+            <p>${selectedFrom.code} - ${selectedFrom.icao}</p>
+            <p class="text-gray-600">Direct Route</p>
+          </div>
+        `);
+        
+        const toMarker = L.marker([selectedTo.lat, selectedTo.lon], {
+          title: `${selectedTo.code} - ${selectedTo.name}`
+        }).bindPopup(`
+          <div class="text-sm">
+            <p class="font-semibold">${selectedTo.name}</p>
+            <p>${selectedTo.code} - ${selectedTo.icao}</p>
+            <p class="text-gray-600">Direct Route</p>
+          </div>
+        `);
+        
+        markers.push(fromMarker, toMarker);
+        fromMarker.addTo(map);
+        toMarker.addTo(map);
         
         flightPath = L.polyline(pathCoordinates, {
           className: 'flight-path',
