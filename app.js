@@ -9,22 +9,48 @@ let airports = [];
 // Load airports data
 async function loadAirports() {
   try {
+    console.log('Starting to load airports data...');
     const response = await fetch('airports.json');
-    airports = await response.json();
-    console.log('Loaded airports:', airports.length);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const text = await response.text();
+    console.log('Received airports data, length:', text.length);
+    try {
+      airports = JSON.parse(text);
+      console.log('Successfully parsed airports data:', airports.length);
+    } catch (parseError) {
+      console.error('Error parsing airports data:', parseError);
+      throw new Error('Failed to parse airports data: ' + parseError.message);
+    }
     
     // Initialize autocomplete after loading airports
     setupAutocomplete('from-input', 'from-suggestions', (airport) => {
       selectedFrom = airport;
-      updateFlightPath(false); // Don't calculate route yet
+      updateFlightPath(false);
     });
 
     setupAutocomplete('to-input', 'to-suggestions', (airport) => {
       selectedTo = airport;
-      updateFlightPath(false); // Don't calculate route yet
+      updateFlightPath(false);
     });
+
+    // Hide loading state and show main content
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('main-content').classList.remove('hidden');
   } catch (error) {
     console.error('Error loading airports:', error);
+    const loadingElement = document.getElementById('loading');
+    if (loadingElement) {
+      loadingElement.innerHTML = `
+        <div class="text-center py-12">
+          <p class="text-red-500 dark:text-red-400 text-lg">Error loading airports: ${error.message}</p>
+          <button onclick="location.reload()" class="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600">
+            Retry
+          </button>
+        </div>
+      `;
+    }
   }
 }
 
