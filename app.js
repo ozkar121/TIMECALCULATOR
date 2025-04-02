@@ -72,36 +72,52 @@ function initializeDarkMode() {
 
 // Initialize map
 function initializeMap() {
-  map = L.map('map').setView([39.8283, -98.5795], 4); // Center on USA
-
-  // Add tile layer with conditional dark mode
-  const isDark = document.documentElement.classList.contains('dark');
+  map = L.map('map').setView([39.8283, -98.5795], 4);
+  
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: ' OpenStreetMap contributors'
   }).addTo(map);
 
-  // Clear existing markers
+  // Clear any existing markers
   markers.forEach(marker => map.removeLayer(marker));
   markers.length = 0;
-
-  // Add airport markers
-  airports.forEach(airport => {
-    const marker = L.marker([airport.lat, airport.lon], {
-      title: `${airport.code} - ${airport.name}`
-    });
-    markers.push(marker);
-    marker.addTo(map);
-  });
 }
 
-// Update flight path on map
+// Update markers and flight path on map
 async function updateFlightPath() {
+  // Clear existing markers and path
+  markers.forEach(marker => map.removeLayer(marker));
+  markers.length = 0;
+  
   if (flightPath) {
     map.removeLayer(flightPath);
   }
 
   if (selectedFrom && selectedTo) {
     try {
+      // Add markers for selected airports
+      const fromMarker = L.marker([selectedFrom.lat, selectedFrom.lon], {
+        title: `${selectedFrom.code} - ${selectedFrom.name}`
+      }).bindPopup(`
+        <div class="text-sm">
+          <p class="font-semibold">${selectedFrom.name}</p>
+          <p>${selectedFrom.code} - ${selectedFrom.icao}</p>
+        </div>
+      `);
+      
+      const toMarker = L.marker([selectedTo.lat, selectedTo.lon], {
+        title: `${selectedTo.code} - ${selectedTo.name}`
+      }).bindPopup(`
+        <div class="text-sm">
+          <p class="font-semibold">${selectedTo.name}</p>
+          <p>${selectedTo.code} - ${selectedTo.icao}</p>
+        </div>
+      `);
+      
+      markers.push(fromMarker, toMarker);
+      fromMarker.addTo(map);
+      toMarker.addTo(map);
+
       // Try to find a route using airways
       const route = await findBestRoute(selectedFrom, selectedTo);
       console.log('Found route:', route);
@@ -110,6 +126,26 @@ async function updateFlightPath() {
       if (route) {
         // Use airway route
         pathCoordinates = route.waypoints.map(wp => [wp.lat, wp.lon]);
+        
+        // Add markers for waypoints
+        route.waypoints.forEach((wp, index) => {
+          if (index > 0 && index < route.waypoints.length - 1) { // Skip first and last (airports)
+            const marker = L.marker([wp.lat, wp.lon], {
+              title: wp.name,
+              icon: L.divIcon({
+                className: 'waypoint-marker',
+                html: '<div class="w-3 h-3 bg-blue-500 rounded-full border-2 border-white"></div>'
+              })
+            }).bindPopup(`
+              <div class="text-sm">
+                <p class="font-semibold">${wp.name}</p>
+                <p class="text-gray-600">${wp.type || 'Waypoint'}</p>
+              </div>
+            `);
+            markers.push(marker);
+            marker.addTo(map);
+          }
+        });
         
         // Add route information to the map
         const routeInfo = L.popup()
@@ -149,6 +185,16 @@ async function updateFlightPath() {
     }
   }
 }
+
+// Add custom styles for waypoint markers
+const style = document.createElement('style');
+style.textContent = `
+  .waypoint-marker {
+    background: transparent;
+    border: none;
+  }
+`;
+document.head.appendChild(style);
 
 // Calculate total distance along a path of coordinates
 function calculatePathDistance(coordinates) {
